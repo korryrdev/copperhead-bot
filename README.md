@@ -1,6 +1,6 @@
 # CopperHead Bot
 
-Version: 3.7.0
+Version: 4.0.0
 
 A starter template for building your own AI bot to compete in [CopperHead](https://github.com/revodavid/copperhead-server) Snake tournaments.
 
@@ -161,13 +161,14 @@ The server sends JSON messages to connected clients. Each message has a `type` f
 
 | Message Type | When Sent | Key Data |
 |--------------|-----------|----------|
-| `joined` | After connecting | `player_id`, `room_id` — your assigned player number and arena |
+| `lobby_joined` | After sending `join` action | Confirmation that you've joined the lobby |
+| `lobby_update` | Lobby state changes | Current lobby players and slot assignments |
+| `match_assigned` | Competition starts or next round | `player_id`, `room_id`, `opponent` — send `ready` to begin |
 | `waiting` | Waiting for opponent | Indicates you're waiting for another player to join |
 | `start` | Game begins | `mode`, `room_id` — the game is starting |
 | `state` | Every game tick | `game` — complete game state (see below) |
 | `gameover` | A game ends | `winner`, `wins`, `points_to_win` — who won and current scores |
 | `match_complete` | Match ends | `winner`, `final_score` — who won the match |
-| `match_assigned` | Next round starts | `room_id`, `player_id`, `opponent` — your new match assignment |
 | `competition_complete` | Tournament ends | `champion` — the overall winner |
 | `error` | Something went wrong | `message` — error description |
 
@@ -217,7 +218,8 @@ Bots send JSON messages to control their snake:
 
 | Action | Format | Description |
 |--------|--------|-------------|
-| Ready | `{"action": "ready", "mode": "two_player", "name": "MyBot"}` | Signal you're ready to play |
+| Join | `{"action": "join", "name": "MyBot"}` | Join the lobby |
+| Ready | `{"action": "ready", "name": "MyBot"}` | Signal ready for a match |
 | Move | `{"action": "move", "direction": "up"}` | Change snake direction |
 
 Valid directions: `"up"`, `"down"`, `"left"`, `"right"`
@@ -256,7 +258,7 @@ RobotPlayer(server_url: str, difficulty: int = 5, quiet: bool = False)
 #### Key Methods
 
 **`async connect()`**
-Connects to the server and waits for player assignment. Returns `True` on success.
+Connects to the server and sends the `join` action to enter the lobby. Returns `True` on success.
 
 **`async play()`**
 Main game loop. Call this to start playing. Runs until disconnected or eliminated.

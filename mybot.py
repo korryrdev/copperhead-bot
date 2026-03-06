@@ -77,7 +77,12 @@ class MyBot:
     # ========================================================================
 
     async def wait_for_open_competition(self):
-        """Wait until a competition is accepting players before joining."""
+        """Wait until the server is reachable, then return.
+        
+        Bots always join the lobby regardless of competition state —
+        the lobby is always available and the bot will wait there until
+        the next competition starts.
+        """
         import aiohttp
 
         base_url = self.server_url.rstrip("/")
@@ -89,15 +94,10 @@ class MyBot:
         while True:
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{http_url}/competition") as resp:
+                    async with session.get(f"{http_url}/status") as resp:
                         if resp.status == 200:
-                            data = await resp.json()
-                            state = data.get("state", "")
-                            if state == "waiting_for_players":
-                                self.log("Competition open - joining now!")
-                                return True
-                            else:
-                                self.log(f"Competition in progress ({state}), waiting...")
+                            self.log("Server reachable - joining lobby...")
+                            return True
                         else:
                             self.log(f"Server not ready (status {resp.status}), waiting...")
             except Exception as e:
@@ -117,7 +117,12 @@ class MyBot:
         try:
             self.log(f"Connecting to {url}...")
             self.ws = await websockets.connect(url)
-            self.log("Connected! Waiting for player assignment...")
+            self.log("Connected! Joining lobby...")
+            # Send join message to enter the lobby
+            await self.ws.send(json.dumps({
+                "action": "join",
+                "name": self.name
+            }))
             return True
         except Exception as e:
             self.log(f"Connection failed: {e}")
@@ -232,6 +237,17 @@ class MyBot:
             self.game_state = None
             opponent = data.get("opponent", "Opponent")
             self.log(f"Next round! Arena {self.room_id} vs {opponent}")
+            # Signal ready to the server
+            await self.ws.send(json.dumps({"action": "ready", "name": self.name}))
+
+        elif msg_type in ("lobby_joined", "lobby_update"):
+            # In the lobby waiting for the competition to start
+            if msg_type == "lobby_joined":
+                self.log(f"Joined lobby as '{data.get('name', self.name)}'")
+
+        elif msg_type in ("lobby_left", "lobby_kicked"):
+            self.log("Removed from lobby.")
+            self.running = False
 
         elif msg_type == "competition_complete":
             champion = data.get("champion", {}).get("name", "Unknown")
