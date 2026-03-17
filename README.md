@@ -1,6 +1,6 @@
 # CopperHead Bot
 
-Version: 4.0.2
+Version: 4.0.3
 
 A starter template for building your own AI bot to compete in [CopperHead](https://github.com/revodavid/copperhead-server) Snake tournaments.
 
@@ -31,7 +31,7 @@ You can develop your bot in **GitHub Codespaces** (recommended) or locally.
   pip install -r requirements.txt
   ```
 
-### 2. Test the basic bot
+### 2. Try out the basic bot
 
 To start with, the file `mybot.py` implements a simplistic bot. Run it and join the CopperHead tournament server with:
 ```bash
@@ -90,32 +90,29 @@ if food and new_x == food[0] and new_y == food[1]:
 
 Make sure your CopperHead Server is running and ready to accept players. The examples below assume the server is running on `localhost` port 8765; replace with the actual server URL and port as required.
 
-#### Option A: Use the server API to spawn an opponent
-
-This is the easiest way to quickly test your bot. Use the server's `/add_bot` API to spawn an opponent:
-
-```bash
-# Spawn a CopperBot opponent
-curl -X POST "http://localhost:8765/add_bot?difficulty=5"
-
-# Then run your bot
-python mybot.py --server ws://localhost:8765/ws/
-```
-
-Or from the client UI, click "Add Bot" to spawn a CopperBot, then run your bot to join as the second player.
-
-#### Option B: Test in a competition
+#### Option A: Test in a competition
 
 For tournament-style testing with multiple bots:
 
 1. Start a CopperHead server (or connect to an existing one)
-2. Run your bot:
+2. Launch the client in Administrator mode
+3. Run your bot:
    ```bash
    python mybot.py --server ws://localhost:8765/ws/
    ```
-3. Your bot will wait for another player (human or bot) to join
+4. Your bot will wait for another player (human or bot) to join
 
 **Tip**: Run two instances of your bot to watch them compete against each other!
+
+#### Option B: Run the protocol test suite
+
+You can also run the automated test suite to verify your bot follows the CopperHead protocol correctly. This launches a local server, runs your bot through a full tournament, and checks for errors:
+
+```bash
+python tests/test_bot_protocol.py --bot mybot.py
+```
+
+See [Testing](#testing) for details.
 
 ### 5. Iterate and improve
 
@@ -337,6 +334,31 @@ def calculate_move(self) -> str | None:
 ```
 
 This simple bot just avoids walls and other snakes, without seeking food. Use it as a starting point and add your own strategy!
+
+## Testing
+
+The test suite validates that your bot correctly follows the CopperHead WebSocket protocol. It launches a local CopperHead server, runs your bot against it, and checks protocol compliance.
+
+**Requirements:** The `copperhead-server` repo must be cloned as a sibling directory (i.e., `../copperhead-server`).
+
+```bash
+# Test mybot.py (default)
+python tests/test_bot_protocol.py
+
+# Test any bot file
+python tests/test_bot_protocol.py --bot path/to/your_bot.py
+
+# Verbose output
+python tests/test_bot_protocol.py -v
+```
+
+The tests verify that your bot:
+- Connects and joins the lobby
+- Accepts the `--difficulty` CLI flag
+- Sends its name correctly to the server
+- Completes a full tournament (join → ready → moves → gameover → match → exit)
+- Exits cleanly without errors
+- Handles server disconnection gracefully
 
 ## Server Reference
 
