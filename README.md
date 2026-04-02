@@ -1,10 +1,10 @@
-# CopperHead Bot
+# Aldobot: CopperHead AI Champion
 
 Version: 4.0.6
 
-A starter template for building your own AI bot to compete in [CopperHead](https://github.com/revodavid/copperhead-server) Snake tournaments.
+An advanced, highly-survivable deterministic AI bot built to completely dominate [CopperHead](https://github.com/revodavid/copperhead-server) Snake tournaments!
 
-For a video guide on building your bot, watch: [How to Build Your Own CopperHead Bot](https://youtu.be/qSY4JtkZAiY).
+Aldobot evaluates the board using advanced state-aware Breadth-First-Search (BFS) pathfinding, Flood Fill survival scanning, and competitive opponent hunting logic. For a detailed breakdown of its strategies, see [aldo.md](aldo.md).
 
 ## What You'll Need
 
@@ -31,11 +31,11 @@ You can develop your bot in **GitHub Codespaces** (recommended) or locally.
   pip install -r requirements.txt
   ```
 
-### 2. Try out the basic bot
+### 2. Launch Aldobot
 
-To start with, the file `mybot.py` implements a simplistic bot. Run it and join the CopperHead tournament server with:
+The advanced bot is entirely contained within `aldobot.py`. Run it and join the CopperHead tournament server with:
 ```bash
-python mybot.py --server wss://your-codespace-url.app.github.dev/ws/
+python aldobot.py --server wss://your-codespace-url.app.github.dev/ws/
 ```
 
 You can find the tournament server URL at the bottom of the lobby screen in the CopperHead Client webpage. It will look like `wss://your-codespace-url.app.github.dev/ws/`.
@@ -109,7 +109,7 @@ For tournament-style testing with multiple bots:
 You can also run the automated test suite to verify your bot follows the CopperHead protocol correctly. This launches a local server, runs your bot through a full tournament, and checks for errors:
 
 ```bash
-python tests/test_bot_protocol.py --bot mybot.py
+python tests/test_bot_protocol.py --bot aldobot.py
 ```
 
 See [Testing](#testing) for details.

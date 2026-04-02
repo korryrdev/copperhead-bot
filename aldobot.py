@@ -261,23 +261,54 @@ class MyBot:
     #  YOUR AI STRATEGY - Modify calculate_move() to change how your bot plays
     # ========================================================================
 
+    def get_safe_neighbors(self, cx, cy, dangerous):
+        """Returns valid adjacent tiles ignoring walls and dangerous cells."""
+        moves = []
+        for direction, (dx, dy) in {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}.items():
+            nx, ny = cx + dx, cy + dy
+            if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
+                if (nx, ny) not in dangerous:
+                    moves.append((nx, ny, direction))
+        return moves
+
+    def flood_fill(self, start_x, start_y, dangerous, my_tail=None):
+        """BFS flood fill to count connected safe space. Returns 10000 if it can reach its own tail."""
+        visited = {(start_x, start_y)}
+        q = deque([(start_x, start_y)])
+        while q:
+            cx, cy = q.popleft()
+            if my_tail and (cx, cy) == tuple(my_tail):
+                return 10000
+            for nx, ny, _ in self.get_safe_neighbors(cx, cy, dangerous):
+                if (nx, ny) not in visited:
+                    visited.add((nx, ny))
+                    q.append((nx, ny))
+        return len(visited)
+
+    def bfs_shortest_path(self, start_x, start_y, targets, dangerous):
+        """Find the absolute shortest safe path to any of the targets. Returns shortest distance or None."""
+        if not targets:
+            return None
+        visited = {(start_x, start_y)}
+        q = deque([(start_x, start_y, 0)])
+        shortest = None
+        while q:
+            cx, cy, dist = q.popleft()
+            if (cx, cy) in targets:
+                if shortest is None or dist < shortest:
+                    shortest = dist
+            for nx, ny, _ in self.get_safe_neighbors(cx, cy, dangerous):
+                if (nx, ny) not in visited:
+                    visited.add((nx, ny))
+                    q.append((nx, ny, dist + 1))
+        return shortest
+
     def calculate_move(self) -> str | None:
-        """Intelligent move selection using flood fill, BFS pathfinding, and opponent awareness.
-
-        Strategy:
-            1. Flood fill each candidate move — heavily penalise moves that trap us
-            2. BFS to find true (obstacle-aware) distance to food
-            3. Race logic — use actual BFS distance for opponent too
-            4. Head-on collision — dodge unless we're longer (then attack)
-            5. Opponent trapping — when longer, intercept opponent's path
-            6. Tail following — safe fallback to avoid dead ends
-            7. Edge avoidance — slight preference for the centre
-
-        Available data:
-            self.game_state     - Full game state
-            self.player_id      - Our player number (1 or 2)
-            self.grid_width     - Width of the game board
-            self.grid_height    - Height of the game board
+        """Intelligent move selection using exactly four priorities:
+        1. Flood Fill Survival
+        2. Aggressive Opponent Hunting
+        3. Optimal Food Routing
+        4. Tail Chasing
         """
         if not self.game_state:
             return None
@@ -295,195 +326,138 @@ class MyBot:
 
         opp_id = str(3 - self.player_id)
         opp_snake = snakes.get(opp_id)
+        
         opp_head = opp_snake["body"][0] if opp_snake and opp_snake.get("body") else None
         opp_length = len(opp_snake["body"]) if opp_snake and opp_snake.get("body") else 0
+        opp_tail = opp_snake["body"][-1] if opp_snake and opp_snake.get("body") else None
 
         foods = self.game_state.get("foods", [])
 
-        # Occupied cells: all snake bodies minus tails (tails vacate next tick)
+        # Calculate dangerous cells
         dangerous = set()
-        for snake_data in snakes.values():
+        for s_id, snake_data in snakes.items():
+            if not snake_data.get("alive", True):
+                continue
             body = snake_data.get("body", [])
+            # Tail becomes free next tick unless snake eats, assume free for more aggression
             for segment in body[:-1]:
                 dangerous.add((segment[0], segment[1]))
-
-        directions = {
-            "up":    (0, -1),
-            "down":  (0,  1),
-            "left":  (-1, 0),
-            "right": (1,  0),
-        }
-        dir_vectors = list(directions.values())
+                
         opposites = {"up": "down", "down": "up", "left": "right", "right": "left"}
-
-        def in_bounds(x, y):
-            return 0 <= x < self.grid_width and 0 <= y < self.grid_height
-
-        def is_safe(x, y):
-            return in_bounds(x, y) and (x, y) not in dangerous
-
-        def flood_fill(start_x, start_y):
-            """BFS flood fill — returns number of reachable cells."""
-            visited = {(start_x, start_y)}
-            q = deque([(start_x, start_y)])
-            while q:
-                cx, cy = q.popleft()
-                for dx, dy in dir_vectors:
-                    nx, ny = cx + dx, cy + dy
-                    if (nx, ny) not in visited and is_safe(nx, ny):
-                        visited.add((nx, ny))
-                        q.append((nx, ny))
-            return len(visited)
-
-        def bfs_dist_to_targets(start_x, start_y, targets):
-            """BFS from start — returns {target: distance} for all reachable targets."""
-            if not targets:
-                return {}
-            remaining = set(targets)
-            found = {}
-            visited = {(start_x, start_y)}
-            q = deque([(start_x, start_y, 0)])
-            while q and remaining:
-                cx, cy, dist = q.popleft()
-                if (cx, cy) in remaining:
-                    found[(cx, cy)] = dist
-                    remaining.discard((cx, cy))
-                for dx, dy in dir_vectors:
-                    nx, ny = cx + dx, cy + dy
-                    if (nx, ny) not in visited and is_safe(nx, ny):
-                        visited.add((nx, ny))
-                        q.append((nx, ny, dist + 1))
-            return found
-
-        food_targets = {(f["x"], f["y"]) for f in foods}
-
-        # Pre-compute BFS distances for both snakes to all foods
-        my_food_dists = bfs_dist_to_targets(head[0], head[1], food_targets)
-        opp_food_dists = {}
-        if opp_head:
-            opp_food_dists = bfs_dist_to_targets(opp_head[0], opp_head[1], food_targets)
-
-        # Cells opponent could reach next tick (for head-on collision detection)
-        opp_next = set()
-        if opp_head:
-            for dx, dy in dir_vectors:
-                nx, ny = opp_head[0] + dx, opp_head[1] + dy
-                if in_bounds(nx, ny):
-                    opp_next.add((nx, ny))
-
-        # Candidate moves (no reversals, no immediate walls/bodies)
-        safe_moves = []
-        for direction, (dx, dy) in directions.items():
-            if direction == opposites.get(current_dir):
-                continue
-            nx, ny = head[0] + dx, head[1] + dy
-            if is_safe(nx, ny):
-                safe_moves.append({"direction": direction, "x": nx, "y": ny})
-
-        if not safe_moves:
-            # All moves blocked — pick anything valid to avoid reversal crash
-            for direction in directions:
+        
+        # Candidate moves (no immediate reversals, walls, or bodies)
+        valid_moves = []
+        for nx, ny, direction in self.get_safe_neighbors(head[0], head[1], dangerous):
+            if direction != opposites.get(current_dir):
+                valid_moves.append({"x": nx, "y": ny, "direction": direction})
+                
+        if not valid_moves:
+            # Revert to any valid available move to avoid direct reversal crash
+            for direction in ["up", "down", "left", "right"]:
                 if direction != opposites.get(current_dir):
                     return direction
             return current_dir
 
-        best_dir = None
-        best_score = float('-inf')
-
-        hunting_mode = my_length > opp_length + 1  # We're longer — go aggressive
-
-        for move in safe_moves:
-            score = 0
+        # Move options with scores/properties
+        options = []
+        for move in valid_moves:
             nx, ny = move["x"], move["y"]
+            safe_area = self.flood_fill(nx, ny, dangerous, my_tail=my_tail)
+            options.append({
+                "move": move,
+                "safe_area": safe_area,
+                "nx": nx,
+                "ny": ny,
+                "direction": move["direction"]
+            })
+            
+        # -- Priority 1: Flood Fill for Flawless Survival --
+        # Filter moves that lead to dead ends (safe cells < my_length)
+        survivable_options = [opt for opt in options if opt["safe_area"] >= my_length]
+        if not survivable_options:
+            # If all are dead ends, pick the one with max safe area to stall
+            best_die_opt = max(options, key=lambda opt: opt["safe_area"])
+            return best_die_opt["direction"]
+            
+        options = survivable_options
+        
+        # -- Priority 2: Aggressive Opponent Hunting --
+        if my_length > opp_length and opp_head:
+            dist_to_opp = abs(head[0] - opp_head[0]) + abs(head[1] - opp_head[1])
+            if dist_to_opp <= 3:
+                # We are close and strictly longer. Bias towards minimizing next distance
+                best_hunt_opt = min(options, key=lambda opt: abs(opt["nx"] - opp_head[0]) + abs(opt["ny"] - opp_head[1]))
+                return best_hunt_opt["direction"]
 
-            # ── 1. Flood fill: survival first ─────────────────────────────
-            reachable = flood_fill(nx, ny)
-            if reachable < my_length:
-                score -= 50000          # Near-certain death — hard veto
-            elif reachable < my_length * 1.5:
-                score -= 8000           # Very tight — strongly avoid
-            elif reachable < my_length * 2:
-                score -= 2000           # Somewhat tight
-            else:
-                score += min(reachable, 150) * 3   # Capped so food can compete
-
-            # ── 2. 2-step lookahead: count options from next position ─────
-            next_safe_count = 0
-            for d2, (dx2, dy2) in directions.items():
-                if d2 == opposites.get(move["direction"]):
-                    continue
-                nnx, nny = nx + dx2, ny + dy2
-                if is_safe(nnx, nny) and (nnx, nny) != (head[0], head[1]):
-                    next_safe_count += 1
-            score += next_safe_count * 200  # Reward keeping options open
-
-            # ── 3. Food: score ALL reachable food, pick best ──────────────
-            if food_targets:
-                move_food_dists = bfs_dist_to_targets(nx, ny, food_targets)
-                best_food_score = 0
-                for food_pos in food_targets:
-                    my_d = move_food_dists.get(food_pos)
-                    if my_d is None:
-                        continue        # Food unreachable from here — skip
-                    opp_d = opp_food_dists.get(food_pos, float('inf'))
-
-                    if (nx, ny) == food_pos:
-                        fs = 10000      # Eating food this move — top priority
-                    elif my_d <= 2:
-                        fs = 7000 - my_d * 300   # Almost there — very aggressive
-                    elif my_d < opp_d:
-                        fs = (100 - my_d) * 60   # Winning the food race
+        # -- Priority 3: Optimal Food Routing with Competitive Racing (A* / BFS) --
+        food_targets = {(f["x"], f["y"]) for f in foods}
+        
+        # Calculate opponent's distance to each food item 
+        opp_food_dists = {}
+        if opp_head:
+            for fx, fy in food_targets:
+                d = self.bfs_shortest_path(opp_head[0], opp_head[1], {(fx, fy)}, dangerous)
+                opp_food_dists[(fx, fy)] = d if d is not None else float('inf')
+                
+        best_food_score = float('-inf')
+        best_food_opts = []
+        
+        for opt in options:
+            for fx, fy in food_targets:
+                my_d = self.bfs_shortest_path(opt["nx"], opt["ny"], {(fx, fy)}, dangerous)
+                if my_d is not None:
+                    opp_d = opp_food_dists.get((fx, fy), float('inf'))
+                    
+                    # Base score: closer is better
+                    score = 1000 - (my_d * 10)
+                    
+                    if my_d < opp_d:
+                        score += 500  # We are closer, big bonus to secure it
+                        if opp_d - my_d <= 2:
+                            score += 200 # We can steal it right in front of them
                     elif my_d == opp_d:
-                        fs = (100 - my_d) * 30   # Tied race
+                        if my_length > opp_length:
+                            score += 300 # We survive collision, win the tie
+                        else:
+                            score -= 300 # They win the tie, avoid
                     else:
-                        # Even if losing race, still chase — being longer wins fights
-                        fs = (100 - my_d) * 15
+                        score -= 800  # They are closer, actively pursue other food if possible
 
-                    best_food_score = max(best_food_score, fs)
-                score += best_food_score
-
-            # ── 4. Head-on collision ──────────────────────────────────────
-            if (nx, ny) in opp_next:
-                if my_length > opp_length + 1:
-                    score += 3000       # Kill shot — actively seek this
-                else:
-                    score -= 2000       # Tie or loss — avoid
-
-            # ── 5. Hunt mode: when longer, close in on opponent ──────────
-            if hunting_mode and opp_head:
-                opp_dist_now = abs(head[0] - opp_head[0]) + abs(head[1] - opp_head[1])
-                opp_dist_next = abs(nx - opp_head[0]) + abs(ny - opp_head[1])
-                if opp_dist_next < opp_dist_now:
-                    score += 600        # Closing in on opponent
-                # Cut off opponent from their nearest food
-                opp_best_food = min(opp_food_dists, key=lambda t: opp_food_dists[t], default=None)
-                if opp_best_food:
-                    opp_hx, opp_hy = opp_head
-                    fx, fy = opp_best_food
-                    if (min(opp_hx, fx) <= nx <= max(opp_hx, fx) and
-                            min(opp_hy, fy) <= ny <= max(opp_hy, fy)):
-                        score += 400    # Blocking opponent's food path
-
-            # ── 6. Tail following (tight spaces only) ────────────────────
-            tail_dist = abs(nx - my_tail[0]) + abs(ny - my_tail[1])
-            if reachable < my_length * 3:
-                score += max(0, 10 - tail_dist) * 8
-
-            # ── 7. Wall avoidance ─────────────────────────────────────────
-            edge_dist = min(nx, self.grid_width - 1 - nx,
-                            ny, self.grid_height - 1 - ny)
-            if edge_dist == 0:
-                score -= 300            # On the wall
-            elif edge_dist == 1:
-                score -= 80             # Adjacent to wall
-            else:
-                score += edge_dist * 15  # Centre preference
-
-            if score > best_score:
-                best_score = score
-                best_dir = move["direction"]
-
-        return best_dir
+                    if score > best_food_score:
+                        best_food_score = score
+                        best_food_opts = [opt]
+                    elif score == best_food_score:
+                        best_food_opts.append(opt)
+                
+        if best_food_opts:
+            # Tie breaker: pick the one with the most safe_area to avoid circling
+            best_food_opt = max(best_food_opts, key=lambda o: o["safe_area"])
+            return best_food_opt["direction"]
+            
+        # -- Priority 4: Tail Chasing (Stalling Strategy) --
+        tails = set()
+        if my_tail:
+            tails.add(tuple(my_tail))
+        if opp_tail:
+            tails.add(tuple(opp_tail))
+            
+        best_tail_dist = float('inf')
+        best_tail_opts = []
+        for opt in options:
+            dist = self.bfs_shortest_path(opt["nx"], opt["ny"], tails, dangerous)
+            if dist is not None:
+                if dist < best_tail_dist:
+                    best_tail_dist = dist
+                    best_tail_opts = [opt]
+                elif dist == best_tail_dist:
+                    best_tail_opts.append(opt)
+                
+        if best_tail_opts:
+            best_tail_opt = max(best_tail_opts, key=lambda o: o["safe_area"])
+            return best_tail_opt["direction"]
+            
+        # Fallback: Just return any safe survivable option
+        return options[0]["direction"]
 
 
 # ============================================================================
